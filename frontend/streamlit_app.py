@@ -13,7 +13,7 @@ import streamlit as st
 import requests
 import base64
 
-API_URL = "http://localhost:8002"
+API_URL = "https://wasserstoff-aiinterntask-qhls.onrender.com"
 
 st.set_page_config(page_title="Wasserstoff Document Research Chatbot", layout="wide")
 st.title("📄 Document Research & Theme Identification Chatbot")
