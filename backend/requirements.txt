@@ -34,5 +34,8 @@ faiss-cpu
 # --- If you use dotenv for secret management ---
 python-dotenv
 
+langchain
+langchain-community
+langchain-core
 
 
