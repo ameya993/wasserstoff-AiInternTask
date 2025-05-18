@@ -39,5 +39,6 @@ langchain-community
 langchain-core
 python-multipart
 pdfplumber
+sentence-transformers
 
 
