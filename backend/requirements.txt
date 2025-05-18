@@ -37,5 +37,5 @@ python-dotenv
 langchain
 langchain-community
 langchain-core
-
+python-multipart
 
