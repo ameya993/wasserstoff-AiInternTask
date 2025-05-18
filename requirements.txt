@@ -1,0 +1,38 @@
+# --- Main UI ---
+streamlit>=1.25.0
+
+# --- HTTP requests ---
+requests>=2.28.0
+
+# --- Data handling ---
+pandas>=1.5.0
+
+# --- OCR and image processing (if used in frontend) ---
+pillow>=9.5.0
+
+# --- For PDF preview/download (optional, if you use PyPDF2 in frontend) ---
+PyPDF2>=3.0.0
+
+# --- For base64 encoding/decoding (standard library, so not needed) ---
+
+# --- If you use numpy anywhere ---
+numpy>=1.23.0
+
+# --- If you use matplotlib for any visualization ---
+matplotlib>=3.7.0
+
+# --- For backend (FastAPI, Tesseract, etc.) ---
+# These are only needed if you deploy the backend on Streamlit Cloud (not recommended)
+fastapi
+uvicorn
+pytesseract
+pdf2image
+langchain
+openai
+faiss-cpu
+
+# --- If you use dotenv for secret management ---
+python-dotenv
+
+
+
