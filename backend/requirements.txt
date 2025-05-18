@@ -38,4 +38,6 @@ langchain
 langchain-community
 langchain-core
 python-multipart
+pdfplumber
+
 
