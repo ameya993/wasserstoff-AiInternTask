@@ -297,13 +297,12 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ---
 
-## Contact
 
-For questions, issues, or feature requests, please open an issue or contact the maintainer at [your-email@example.com].
+
+
+---
+
+
 
 ---
 
-**Enjoy powerful, explainable, and scalable document synthesis with this RAG system!**
-
----
-Answer from Perplexity: pplx.ai/share
