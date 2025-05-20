@@ -16,7 +16,11 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
+<<<<<<< HEAD
     allow_origins=["*"],
+=======
+    allow_origins=["https://docsynth.streamlit.app/"],
+>>>>>>> 0f372db92cd0ea8d056e7fc41931cbd06aa40ddd
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
