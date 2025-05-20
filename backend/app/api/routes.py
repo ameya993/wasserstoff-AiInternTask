@@ -1,17 +1,8 @@
 # Copyright (c) 2025 Ameya Gawande. All rights reserved.
-# 
-# This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License.
-# To view a copy of this license, visit http://creativecommons.org/licenses/by-nc/4.0/
-#
-# You may not use this file except in compliance with the License.
-# Non-commercial use only. Commercial use is strictly prohibited without written permission.
+# Licensed under CC BY-NC 4.0 (https://creativecommons.org/licenses/by-nc/4.0/)
 
-
-
-
-
-
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Depends
+from pydantic import BaseModel
 from app.services.document_loader import load_documents
 from app.services.text_splitter import split_documents
 from app.services.embedding import get_embedding_model
@@ -21,20 +12,49 @@ from langchain_community.vectorstores import FAISS
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from openai import OpenAI
-
+from typing import List, Optional
 import os
 import shutil
 import traceback
 import mimetypes
-
 import pytesseract
 from pdf2image import convert_from_path
 from PIL import Image
+from datetime import datetime
+
+# --- MongoDB Integration ---
+from motor.motor_asyncio import AsyncIOMotorClient
+
+MONGO_URI = os.environ.get("MONGO_URI")  # Set this in your .env or deployment environment
+mongo_client = AsyncIOMotorClient(MONGO_URI)
+mongo_db = mongo_client["wasserstoff"]  # Use your DB name
+
+def get_db():
+    return mongo_db
 
 router = APIRouter()
 VECTOR_STORE_PATH = "data/faiss_index"
 INDEX_FILE = os.path.join(VECTOR_STORE_PATH, "index.faiss")
 UPLOAD_DIR = "data"
+
+# --- Pydantic models ---
+class QueryRequest(BaseModel):
+    query: str
+
+class PerDocQueryRequest(BaseModel):
+    query: str
+    selected_files: Optional[List[str]] = None
+
+class DocAnswer(BaseModel):
+    doc_id: str
+    document: str
+    answer: str
+    citation: str
+
+class ThemeOut(BaseModel):
+    theme: str
+    doc_ids: List[str]
+    summary: str
 
 def deduplicate_documents(documents):
     seen = set()
@@ -85,12 +105,17 @@ def ocr_pdf_file(pdf_path):
     print("[DEBUG] OCR: Finished extracting text from scanned PDF.")
     return text
 
+# Utility: Assign next DOC ID (e.g., DOC001)
+async def get_next_doc_id(db):
+    count = await db.documents.count_documents({})
+    return f"DOC{count+1:03d}"
+
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), db=Depends(get_db)):
     try:
         print(f"Received upload: {file.filename}")
-        os.makedirs("data", exist_ok=True)
-        save_path = os.path.join("data", file.filename)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        save_path = os.path.join(UPLOAD_DIR, file.filename)
         with open(save_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
         print(f"Saved file to {save_path}")
@@ -98,6 +123,18 @@ async def upload_file(file: UploadFile = File(...)):
         print(f"[ERROR] Saving file failed: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"File save failed: {e}")
+
+    # Assign DOC ID
+    doc_id = await get_next_doc_id(db)
+    metadata = {
+        "doc_id": doc_id,
+        "filename": file.filename,
+        "type": file.content_type,
+        "path": save_path,
+        "uploaded_at": datetime.utcnow(),
+        # Add more fields as needed (author, doc_type, etc.)
+    }
+    await db.documents.insert_one(metadata)
 
     # DELETE existing FAISS index before creating a new one
     if os.path.exists(VECTOR_STORE_PATH):
@@ -158,10 +195,197 @@ async def upload_file(file: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Embedding/vectorstore failed: {e}")
 
-    return {"status": "done", "chunks": len(chunks)}
+    return {"status": "done", "doc_id": doc_id, "chunks": len(chunks)}
+
+@router.get("/files")
+async def list_uploaded_files(
+    doc_type: str = Query(None),
+    author: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db=Depends(get_db)
+):
+    query = {}
+    if doc_type:
+        query["type"] = doc_type
+    if author:
+        query["author"] = author
+    if date_from or date_to:
+        query["uploaded_at"] = {}
+        if date_from:
+            query["uploaded_at"]["$gte"] = datetime.fromisoformat(date_from)
+        if date_to:
+            query["uploaded_at"]["$lte"] = datetime.fromisoformat(date_to)
+    
+    # Return just the filenames as a simple array instead of complex objects
+    files = []
+    async for doc in db.documents.find(query):
+        # Just append the filename string directly
+        files.append(doc.get("filename", ""))
+    
+    return {"files": files}
+
+
+@router.post("/per_document_query", response_model=List[DocAnswer])
+async def per_document_query(request: PerDocQueryRequest, db=Depends(get_db)):
+    results = []
+    files = request.selected_files or []
+    
+    if not files:
+        # If no files specified, get all filenames
+        async for doc in db.documents.find({}):
+            files.append(doc["filename"])
+    
+    print(f"[DEBUG] Processing query for files: {files}")
+    
+    # Load embedding model once for all documents
+    embedding_model = get_embedding_model()
+    reranker_model = get_reranker_model()
+    
+    for filename in files:
+        try:
+            doc = await db.documents.find_one({"filename": filename})
+            if not doc:
+                print(f"[WARN] Document not found for filename: {filename}")
+                continue
+                
+            doc_id = doc.get("doc_id", filename)
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            
+            if not os.path.exists(file_path):
+                print(f"[WARN] File not found on disk: {file_path}")
+                continue
+            
+            # Load and process the specific document
+            print(f"[INFO] Loading document: {filename}")
+            documents = []
+            
+            # Handle different document types
+            if is_image(filename):
+                text = ocr_image_file(file_path)
+                documents = [Document(page_content=text, metadata={"source": filename})]
+            elif is_pdf(filename):
+                if not pdf_has_text(file_path):
+                    text = ocr_pdf_file(file_path)
+                    documents = [Document(page_content=text, metadata={"source": filename})]
+                else:
+                    documents = load_documents(file_path)
+            else:
+                documents = load_documents(file_path)
+            
+            # Split the document
+            chunks = split_documents(documents)
+            
+            # Create temporary vectorstore for this document
+            temp_vectorstore = build_vectorstore(chunks, embedding_model)
+            
+            # Set up retrieval pipeline for this document
+            retriever = temp_vectorstore.as_retriever(search_kwargs={"k": 5})
+            compressor = CrossEncoderReranker(model=reranker_model, top_n=3)
+            compression_retriever = ContextualCompressionRetriever(
+                base_compressor=compressor,
+                base_retriever=retriever
+            )
+            
+            # Retrieve relevant chunks
+            relevant_chunks = compression_retriever.invoke(request.query)
+            unique_chunks = deduplicate_documents(relevant_chunks)
+            
+            if not unique_chunks:
+                results.append(DocAnswer(
+                    doc_id=doc_id,
+                    document=filename,
+                    answer="No relevant information found in this document.",
+                    citation="N/A"
+                ))
+                continue
+            
+            # Prepare context from chunks
+            context = ""
+            for chunk in unique_chunks:
+                page = chunk.metadata.get("page_label", chunk.metadata.get("page", ""))
+                para = chunk.metadata.get("paragraph", "")
+                citation = f"Page {page}" if page else "Page ?"
+                if para:
+                    citation += f", Paragraph {para}"
+                context += f"[{citation}] {chunk.page_content}\n\n"
+            
+            # Generate answer using LLM
+            client = OpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=os.environ.get("GROQ_API_KEY")
+            )
+            
+            try:
+                completion = client.chat.completions.create(
+                    model="llama3-70b-8192",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that answers questions based only on the provided context. Be concise and specific. Always cite the page and paragraph numbers."},
+                        {"role": "user", "content": f"Context from document '{filename}':\n{context}\n\nQuestion: {request.query}\nAnswer concisely and cite the specific page and paragraph."}
+                    ],
+                    max_tokens=200,
+                    temperature=0.1,
+                )
+                
+                answer = completion.choices[0].message.content.strip()
+                
+                # Extract citation from the first chunk for simplicity
+                # You could implement more sophisticated citation extraction from the answer
+                first_chunk = unique_chunks[0]
+                page = first_chunk.metadata.get("page_label", first_chunk.metadata.get("page", "?"))
+                para = first_chunk.metadata.get("paragraph", "?")
+                citation = f"Page {page}, Paragraph {para}"
+                
+                results.append(DocAnswer(
+                    doc_id=doc_id,
+                    document=filename,
+                    answer=answer,
+                    citation=citation
+                ))
+                
+            except Exception as e:
+                print(f"[ERROR] LLM processing failed for {filename}: {str(e)}")
+                results.append(DocAnswer(
+                    doc_id=doc_id,
+                    document=filename,
+                    answer=f"Error generating answer: {str(e)}",
+                    citation="N/A"
+                ))
+                
+        except Exception as e:
+            print(f"[ERROR] Error processing document {filename}: {str(e)}")
+            traceback.print_exc()
+    
+    return results
+
+
+
+@router.delete("/delete_file")
+async def delete_file(filename: str = Query(...), db=Depends(get_db)):
+    try:
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            result = await db.documents.delete_one({"filename": filename})
+            if result.deleted_count:
+                print(f"[INFO] Successfully deleted file: {filename}")
+                return {"status": "deleted", "filename": filename}
+            else:
+                print(f"[WARN] File {filename} not found in database")
+                return {"status": "deleted", "filename": filename, "warning": "File not found in database"}
+        else:
+            print(f"[WARN] File {filename} not found on disk")
+            # Still try to remove from database
+            await db.documents.delete_one({"filename": filename})
+            return {"error": "File not found on disk", "filename": filename}
+    except Exception as e:
+        print(f"[ERROR] Error deleting file {filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
+
 
 @router.post("/query")
-async def query(query: str):
+async def query(request: QueryRequest):
+    query = request.query
     """
     Query the FAISS vectorstore and return only a synthesized answer using Groq Llama 3.
     """
@@ -236,10 +460,8 @@ async def query(query: str):
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
 
 @router.post("/themes")
-async def identify_themes(query: str):
-    """
-    Synthesizes common themes across all documents using Groq Llama 3.
-    """
+async def identify_themes(request: QueryRequest):
+    query = request.query
     try:
         embedding_model = get_embedding_model()
         reranker_model = get_reranker_model()
@@ -309,25 +531,3 @@ async def identify_themes(query: str):
         raise HTTPException(status_code=500, detail=f"Theme synthesis failed: {e}")
 
 
-@router.get("/files")
-async def list_uploaded_files():
-    try:
-        if not os.path.exists(UPLOAD_DIR):
-            return {"files": []}
-        files = os.listdir(UPLOAD_DIR)
-        files = [f for f in files if os.path.isfile(os.path.join(UPLOAD_DIR, f))]
-        return {"files": files}
-    except Exception as e:
-        return {"files": [], "error": str(e)}
-    
-
-@router.delete("/delete_file")
-async def delete_file(filename: str = Query(...)):
-    import os
-    UPLOAD_DIR = "data"
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        return {"status": "deleted"}
-    else:
-        return {"error": "File not found"}
