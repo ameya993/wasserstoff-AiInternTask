@@ -9,18 +9,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from app.api.routes import router  # Make sure this is the correct import path
+from fastapi.responses import FileResponse, HTMLResponse
+import os
+from app.api.routes import router
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-<<<<<<< HEAD
     allow_origins=["*"],
-=======
-    allow_origins=["https://docsynth.streamlit.app/"],
->>>>>>> 0f372db92cd0ea8d056e7fc41931cbd06aa40ddd
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,12 +26,33 @@ app.add_middleware(
 # Register your router
 app.include_router(router)
 
-# Mount the static files directory
+# Get the directory of the current file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Go up one level to get to the project root
+project_root = os.path.dirname(os.path.dirname(current_dir))
+# Path to the frontend directory
+frontend_dir = os.path.join(project_root, "frontend")
 
-app.mount("/static", StaticFiles(directory="D:/Assignment/frontend"), name="static")
+# Serve static files (app.js and style.css)
+@app.get("/app.js")
+async def get_js():
+    js_path = os.path.join(frontend_dir, "app.js")
+    return FileResponse(js_path, media_type="application/javascript")
 
-# Add a root endpoint to serve the index.html
-@app.get("/")
+@app.get("/style.css")
+async def get_css():
+    css_path = os.path.join(frontend_dir, "style.css")
+    return FileResponse(css_path, media_type="text/css")
+
+# Serve the index.html at the root
+@app.get("/", response_class=HTMLResponse)
 async def read_root():
-    return FileResponse("D:/Assignment/frontend/index.html")
+    index_path = os.path.join(frontend_dir, "index.html")
+    with open(index_path, "r") as f:
+        content = f.read()
+    return HTMLResponse(content=content)
 
+# For Vercel deployment
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
