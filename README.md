@@ -59,38 +59,10 @@ This system is composed of two main components:
 
 Below is a conceptual diagram of the document synthesis RAG pipeline:
 
+![image](https://github.com/user-attachments/assets/683dc9b2-eff5-4316-a4e6-b513e6531644)
+
 ```
-User Uploads (Web Frontend)
-        |
-        v
-FastAPI Backend (File Save & Metadata)
-        |
-        +---------------------> MongoDB (Document Metadata)
-        |
-        v
-Document Loader & OCR
-        |
-        v
-Text Splitter
-        |
-        v
-Embedding Model
-        |
-        v
-FAISS Vectorstore
-        |
-        v
-Retriever + Reranker
-        |
-        v
-Groq Llama 3 (LLM)
-        |
-        v
-Synthesized Answer (with Citations)
-        |
-        v
-Web Frontend (Display Answer)
-```
+
 
 ---
 
