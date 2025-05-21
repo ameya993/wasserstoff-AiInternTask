@@ -1,0 +1,148 @@
+/* Reset some default margins */
+body, html {
+  height: 100%;
+  background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #222;
+  margin: 0;
+  padding: 0;
+}
+
+/* Glassmorphism card style */
+.glass-card {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: box-shadow 0.3s ease;
+}
+
+/* Hover effect for cards */
+.glass-card:hover {
+  box-shadow: 0 12px 48px 0 rgba(31, 38, 135, 0.6);
+}
+
+/* Navbar tweaks */
+.navbar-brand {
+  font-size: 1.6rem;
+}
+
+/* Drop zone style */
+.drop-zone {
+  border: 2px dashed rgba(255, 255, 255, 0.6);
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 10px;
+  user-select: none;
+  color: #004085;
+  background-color: rgba(255, 255, 255, 0.25);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.drop-zone.dragover {
+  background-color: rgba(255, 255, 255, 0.45);
+  border-color: #0056b3;
+}
+
+/* File list */
+.file-list .list-group-item {
+  font-weight: 500;
+  font-size: 1rem;
+  color: #003366;
+  transition: background-color 0.3s ease;
+}
+
+.file-list .list-group-item:hover {
+  background-color: rgba(0, 0, 50, 0.05);
+}
+
+/* Buttons */
+.btn-primary, .btn-success {
+  font-weight: 600;
+  box-shadow: 0 4px 6px rgba(0, 86, 179, 0.4);
+  transition: box-shadow 0.3s ease;
+}
+
+.btn-primary:hover, .btn-success:hover {
+  box-shadow: 0 6px 12px rgba(0, 86, 179, 0.6);
+}
+
+/* File action button */
+.file-actions {
+  border: none;
+  padding: 0.3rem 0.5rem;
+}
+
+/* Theme list items */
+.theme-list .theme-item {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #1a237e;
+  cursor: default;
+  user-select: none;
+}
+
+/* Table styling */
+table {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+table thead {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+table th, table td {
+  padding: 0.75rem 1rem;
+  color: #003366;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+table tbody tr:hover {
+  background-color: rgba(0, 0, 50, 0.1);
+}
+
+/* Input fields and form controls */
+.form-control {
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  transition: border-color 0.3s ease;
+}
+
+.form-control:focus {
+  border-color: #0056b3;
+  box-shadow: 0 0 8px rgba(0, 86, 179, 0.5);
+  outline: none;
+}
+
+/* Footer */
+footer {
+  background: transparent;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  user-select: none;
+}
+
+/* Responsive adjustments */
+@media (max-width: 576px) {
+  .drop-zone {
+    padding: 20px;
+  }
+  
+  .navbar-brand {
+    font-size: 1.3rem;
+  }
+  
+  .theme-list .theme-item {
+    font-size: 1rem;
+  }
+}
