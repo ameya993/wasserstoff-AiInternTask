@@ -1,88 +1,148 @@
-body {
-  background: linear-gradient(135deg, #e0e7ff 0%, #fdf2f8 100%);
-  font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
-  min-height: 100vh;
+/* Reset some default margins */
+body, html {
+  height: 100%;
+  background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #222;
   margin: 0;
+  padding: 0;
 }
+
+/* Glassmorphism card style */
 .glass-card {
-  background: rgba(255,255,255,0.85);
-  border-radius: 22px;
-  box-shadow: 0 8px 32px 0 rgba(31,38,135,0.15);
-  backdrop-filter: blur(8px);
-  border: 1.5px solid rgba(255,255,255,0.25);
-  margin-bottom: 2rem;
-  transition: box-shadow 0.3s;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: box-shadow 0.3s ease;
 }
+
+/* Hover effect for cards */
 .glass-card:hover {
-  box-shadow: 0 12px 40px 0 rgba(31,38,135,0.22);
+  box-shadow: 0 12px 48px 0 rgba(31, 38, 135, 0.6);
 }
+
+/* Navbar tweaks */
+.navbar-brand {
+  font-size: 1.6rem;
+}
+
+/* Drop zone style */
 .drop-zone {
-  border: 2px dashed #6366f1;
-  border-radius: 16px;
-  padding: 1.5rem;
+  border: 2px dashed rgba(255, 255, 255, 0.6);
+  padding: 30px;
   text-align: center;
-  background: #f3f4f6;
-  color: #6366f1;
-  font-weight: 500;
-  transition: background 0.3s, border-color 0.3s;
-  margin-bottom: 1rem;
   cursor: pointer;
+  border-radius: 10px;
+  user-select: none;
+  color: #004085;
+  background-color: rgba(255, 255, 255, 0.25);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
+
 .drop-zone.dragover {
-  background: #e0e7ff;
-  border-color: #818cf8;
+  background-color: rgba(255, 255, 255, 0.45);
+  border-color: #0056b3;
 }
-.input-group, .form-control, .btn {
-  border-radius: 12px !important;
+
+/* File list */
+.file-list .list-group-item {
+  font-weight: 500;
+  font-size: 1rem;
+  color: #003366;
+  transition: background-color 0.3s ease;
 }
+
+.file-list .list-group-item:hover {
+  background-color: rgba(0, 0, 50, 0.05);
+}
+
+/* Buttons */
 .btn-primary, .btn-success {
   font-weight: 600;
-  letter-spacing: 0.5px;
-  box-shadow: 0 2px 8px #c7d2fe55;
+  box-shadow: 0 4px 6px rgba(0, 86, 179, 0.4);
+  transition: box-shadow 0.3s ease;
 }
+
 .btn-primary:hover, .btn-success:hover {
-  background: #6366f1 !important;
-  box-shadow: 0 4px 16px #818cf855;
+  box-shadow: 0 6px 12px rgba(0, 86, 179, 0.6);
 }
-.list-group-item {
-  background: rgba(255,255,255,0.96);
-  border: none;
-  border-radius: 10px !important;
-  margin-bottom: 8px;
-  box-shadow: 0 2px 6px #e0e7ff55;
-  transition: box-shadow 0.2s;
-  font-size: 1.08em;
-}
-.list-group-item:hover {
-  box-shadow: 0 4px 16px #818cf855;
-  background: #f3f4f6;
-}
+
+/* File action button */
 .file-actions {
-  margin-left: 1rem;
-}
-input[type="file"]::file-selector-button {
-  background: #6366f1;
-  color: #fff;
   border: none;
+  padding: 0.3rem 0.5rem;
+}
+
+/* Theme list items */
+.theme-list .theme-item {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #1a237e;
+  cursor: default;
+  user-select: none;
+}
+
+/* Table styling */
+table {
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  padding: 0.5em 1em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+table thead {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+table th, table td {
+  padding: 0.75rem 1rem;
+  color: #003366;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+table tbody tr:hover {
+  background-color: rgba(0, 0, 50, 0.1);
+}
+
+/* Input fields and form controls */
+.form-control {
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  transition: border-color 0.3s ease;
+}
+
+.form-control:focus {
+  border-color: #0056b3;
+  box-shadow: 0 0 8px rgba(0, 86, 179, 0.5);
+  outline: none;
+}
+
+/* Footer */
+footer {
+  background: transparent;
   font-weight: 500;
-  margin-right: 1em;
-  transition: background 0.2s;
+  letter-spacing: 0.05em;
+  user-select: none;
 }
-input[type="file"]::file-selector-button:hover {
-  background: #818cf8;
-}
-#queryInput {
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
-  font-size: 1.1em;
-}
-#queryInput:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px #6366f133;
-}
-@media (max-width: 600px) {
-  main { padding: 0 0.5em !important; }
-  .glass-card { padding: 1rem 0.5rem; }
+
+/* Responsive adjustments */
+@media (max-width: 576px) {
+  .drop-zone {
+    padding: 20px;
+  }
+  
+  .navbar-brand {
+    font-size: 1.3rem;
+  }
+  
+  .theme-list .theme-item {
+    font-size: 1rem;
+  }
 }

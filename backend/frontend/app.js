@@ -1,5 +1,16 @@
 // CHANGE THIS TO YOUR BACKEND URL
-const API_URL = "http://127.0.0.1:8002";
+const API_URL = "http://127.0.0.1:8002"
+
+function populateThemeCheckboxes(files) {
+  const themeDiv = document.getElementById('themeDocCheckboxes');
+  if (!themeDiv) return;
+  themeDiv.innerHTML = files.map(name =>
+    `<label class="me-2">
+      <input type="checkbox" name="themeDocs" value="${name}"> ${name}
+    </label>`
+  ).join('');
+}
+
 
 // Drag & drop upload
 const dropZone = document.getElementById('dropZone');
@@ -57,63 +68,54 @@ uploadBtn.addEventListener('click', async () => {
 async function loadFiles() {
   const fileList = document.getElementById('fileList');
   fileList.innerHTML = '<li class="list-group-item"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</li>';
-  
+
   try {
     const res = await fetch(`${API_URL}/files`);
     const data = await res.json();
-    
+
     // Debug the response structure
     console.log("Files API response:", data);
-    
+
     fileList.innerHTML = '';
-    
-    // Handle the files array
-    const files = data.files || [];
-    
+
+    // Support both array of strings or array of objects
+    let files = [];
+    if (Array.isArray(data.files)) {
+      files = data.files.map(fileObj => {
+        if (typeof fileObj === 'string') {
+          return fileObj;
+        } else if (typeof fileObj === 'object') {
+          // Try common filename properties
+          return fileObj.filename || fileObj.name || fileObj.file_name || fileObj.path || fileObj.id || "Unknown file";
+        } else {
+          return "Unknown file";
+        }
+      });
+    }
+
+    // Populate checkboxes for themes and other forms
+    populateThemeCheckboxes(files);
+    if (typeof populateDocCheckboxes === 'function') populateDocCheckboxes(files);
+    if (typeof populateCompareCheckboxes === 'function') populateCompareCheckboxes(files);
+
     if (files.length === 0) {
       fileList.innerHTML = '<li class="list-group-item text-muted"><i class="fa-solid fa-circle-info me-2"></i>No files uploaded.</li>';
       return;
     }
-    
-    // Process each file
-    files.forEach(fileObj => {
-      // Extract filename from object - try multiple possible properties
-      let filename;
-      
-      if (typeof fileObj === 'string') {
-        filename = fileObj;
-      } else if (typeof fileObj === 'object') {
-        // Try common filename properties
-        filename = fileObj.filename || fileObj.name || fileObj.file_name || 
-                  fileObj.path || fileObj.id || "Unknown file";
-        
-        // If we still don't have a filename, show the object keys
-        if (filename === "Unknown file") {
-          console.log("File object keys:", Object.keys(fileObj));
-          // Just use the first property as a fallback
-          const firstKey = Object.keys(fileObj)[0];
-          if (firstKey) {
-            filename = fileObj[firstKey];
-          }
-        }
-      } else {
-        filename = "Unknown file";
-      }
-      
+
+    // Process each file for display and deletion
+    files.forEach(filename => {
       console.log("Extracted filename:", filename);
-      
+
       const li = document.createElement('li');
       li.className = "list-group-item d-flex justify-content-between align-items-center";
       li.innerHTML = `<span><i class="fa-solid fa-file-lines me-2 text-primary"></i>${filename}</span>`;
-      
+
       // Delete button
       const del = document.createElement('button');
       del.className = "btn btn-sm btn-danger file-actions";
       del.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
       del.onclick = async () => {
-        // Store the original fileObj for deletion
-        const fileToDelete = fileObj;
-        
         Swal.fire({
           title: `Delete "${filename}"?`,
           text: "This action cannot be undone!",
@@ -123,22 +125,14 @@ async function loadFiles() {
         }).then(async (result) => {
           if (result.isConfirmed) {
             try {
-              // If fileObj is an object, we might need to send it differently
-              let deleteUrl;
-              if (typeof fileToDelete === 'string') {
-                deleteUrl = `${API_URL}/delete_file?filename=${encodeURIComponent(fileToDelete)}`;
-              } else {
-                // Try to use the same property we extracted the filename from
-                deleteUrl = `${API_URL}/delete_file?filename=${encodeURIComponent(filename)}`;
-              }
-              
+              const deleteUrl = `${API_URL}/delete_file?filename=${encodeURIComponent(filename)}`;
               console.log("Deleting file using URL:", deleteUrl);
-              
+
               const deleteRes = await fetch(deleteUrl, { method: "DELETE" });
-              
+
               if (deleteRes.ok) {
-                loadFiles();
-                loadDocCheckboxes();
+                await loadFiles();
+                if (typeof loadDocCheckboxes === 'function') loadDocCheckboxes();
                 Swal.fire("Deleted!", `${filename} has been deleted.`, "success");
               } else {
                 console.error("Delete response:", await deleteRes.text());
@@ -151,7 +145,7 @@ async function loadFiles() {
           }
         });
       };
-      
+
       li.appendChild(del);
       fileList.appendChild(li);
     });
@@ -173,7 +167,8 @@ async function loadDocCheckboxes() {
     
     // Handle the files array
     const files = data.files || [];
-    
+    populateThemeCheckboxes(files);
+
     if (files.length === 0) {
       container.innerHTML = '<div class="text-muted">No files available</div>';
       return;
@@ -283,6 +278,104 @@ document.getElementById('docQueryForm').onsubmit = async (e) => {
     `;
   });
   table.style.display = (data.length > 0) ? "" : "none";
+};
+
+function renderComparisonOutput(comp) {
+  let html = '';
+  if (comp.similarities && comp.similarities.length) {
+    html += '<h5>Similarities</h5><ul>';
+    comp.similarities.forEach(item => html += `<li>${item}</li>`);
+    html += '</ul>';
+  }
+  if (comp.differences && Object.keys(comp.differences).length) {
+    html += '<h5>Differences</h5>';
+    for (const [doc, diffList] of Object.entries(comp.differences)) {
+      html += `<b>${doc}</b>:<ul>`;
+      diffList.forEach(diff => html += `<li>${diff}</li>`);
+      html += '</ul>';
+    }
+  }
+  if (comp.summary) {
+    html += `<h5>Summary</h5><p>${comp.summary}</p>`;
+  }
+  return html;
+}
+
+document.getElementById('compareDocsForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const query = document.getElementById('compareDocsQueryInput').value;
+  const selected = Array.from(document.querySelectorAll('input[name="selectedDocs"]:checked')).map(cb => cb.value);
+
+  const resultDiv = document.getElementById('compareDocsResult');
+  resultDiv.style.display = "block";
+  resultDiv.className = "alert alert-info";
+  resultDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Comparing documents...';
+
+  if (selected.length < 2) {
+    resultDiv.className = "alert alert-warning";
+    resultDiv.textContent = "Please select at least two documents to compare.";
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/compare_documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, selected_files: selected })
+    });
+    const data = await res.json();
+
+    // >>>>>>>>>>>> PUT THE CODE HERE <<<<<<<<<<<<
+    if (res.ok) {
+      resultDiv.className = "alert alert-success";
+      resultDiv.innerHTML = `<b>Compared Documents:</b> ${data.compared_documents.join(", ")}<br>${renderComparisonOutput(data.comparison)}`;
+    } else {
+      resultDiv.className = "alert alert-danger";
+      resultDiv.textContent = data.detail || "Comparison failed.";
+    }
+    // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+  } catch (err) {
+    resultDiv.className = "alert alert-danger";
+    resultDiv.textContent = "Comparison failed: " + err;
+  }
+};
+
+
+document.getElementById('themeForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const selected = Array.from(document.querySelectorAll('input[name="themeDocs"]:checked')).map(cb => cb.value);
+
+  if (selected.length === 0) {
+    Swal.fire('Please select at least one document.');
+    return;
+  }
+
+  const themeList = document.getElementById('themeList');
+  themeList.innerHTML = '<li class="list-group-item">Extracting themes...</li>';
+
+  try {
+    const res = await fetch(`${API_URL}/themes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "Extract main themes",
+        selected_files: selected
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (data.themes && data.themes.length) {
+        themeList.innerHTML = data.themes.map(theme => `<li class="list-group-item">${theme}</li>`).join('');
+      } else {
+        themeList.innerHTML = `<li class="list-group-item text-warning">No themes found for the selected document(s).</li>`;
+      }
+    } else {
+      themeList.innerHTML = `<li class="list-group-item text-danger">${data.detail || "Theme extraction failed."}</li>`;
+    }
+  } catch (err) {
+    themeList.innerHTML = `<li class="list-group-item text-danger">Theme extraction failed: ${err}</li>`;
+  }
 };
 
 // Themes (POST)
