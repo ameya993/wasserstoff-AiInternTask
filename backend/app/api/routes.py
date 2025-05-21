@@ -12,8 +12,11 @@ from langchain_community.vectorstores import FAISS
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from openai import OpenAI
-from typing import List, Optional
+from typing import List, Optional , Dict, Any
 import os
+from langchain_core.documents import Document
+import json
+
 import shutil
 import traceback
 import mimetypes
@@ -50,6 +53,18 @@ class DocAnswer(BaseModel):
     document: str
     answer: str
     citation: str
+
+class CompareDocsRequest(BaseModel):
+    query: str
+    selected_files: List[str]
+
+class CompareDocsResult(BaseModel):
+    compared_documents: List[str]
+    comparison: Dict[str, Any]
+
+class ThemeQueryRequest(BaseModel):
+    query: str
+    selected_files: Optional[List[str]] = None
 
 class ThemeOut(BaseModel):
     theme: str
@@ -110,6 +125,12 @@ async def get_next_doc_id(db):
     count = await db.documents.count_documents({})
     return f"DOC{count+1:03d}"
 
+from fastapi import UploadFile, File, HTTPException, Depends
+from datetime import datetime
+import os
+import shutil
+import traceback
+
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...), db=Depends(get_db)):
     try:
@@ -135,11 +156,6 @@ async def upload_file(file: UploadFile = File(...), db=Depends(get_db)):
         # Add more fields as needed (author, doc_type, etc.)
     }
     await db.documents.insert_one(metadata)
-
-    # DELETE existing FAISS index before creating a new one
-    if os.path.exists(VECTOR_STORE_PATH):
-        print(f"[INFO] Deleting old FAISS index at {VECTOR_STORE_PATH}")
-        shutil.rmtree(VECTOR_STORE_PATH)
 
     # --- OCR or load document ---
     try:
@@ -181,21 +197,29 @@ async def upload_file(file: UploadFile = File(...), db=Depends(get_db)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Split failed: {e}")
 
-    # Embed and build a NEW vectorstore
+    # Embed and append to the existing vectorstore (do NOT delete/rebuild!)
     try:
+        from langchain_community.vectorstores import FAISS
         embedding_model = get_embedding_model()
         print("[INFO] Loaded embedding model")
-        print("[INFO] Creating new vectorstore...")
-        vectorstore = build_vectorstore(chunks, embedding_model)
+        # Try to load existing FAISS index and append, or create new
+        if os.path.exists(INDEX_FILE):
+            print("[INFO] Loading existing FAISS index...")
+            vectorstore = FAISS.load_local(VECTOR_STORE_PATH, embedding_model, allow_dangerous_deserialization=True)
+            vectorstore.add_documents(chunks)
+        else:
+            print("[INFO] Creating new FAISS index...")
+            vectorstore = build_vectorstore(chunks, embedding_model)
         os.makedirs(VECTOR_STORE_PATH, exist_ok=True)
         vectorstore.save_local(VECTOR_STORE_PATH)
-        print(f"[INFO] Saved new vectorstore to {VECTOR_STORE_PATH}")
+        print(f"[INFO] Saved (appended) vectorstore to {VECTOR_STORE_PATH}")
     except Exception as e:
         print(f"[ERROR] Embedding/vectorstore failed: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Embedding/vectorstore failed: {e}")
 
     return {"status": "done", "doc_id": doc_id, "chunks": len(chunks)}
+
 
 @router.get("/files")
 async def list_uploaded_files(
@@ -459,27 +483,150 @@ async def query(request: QueryRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
 
+@router.post("/compare_documents", response_model=CompareDocsResult)
+async def compare_documents(request: CompareDocsRequest, db=Depends(get_db)):
+    files = request.selected_files
+    if not files or len(files) < 2:
+        raise HTTPException(status_code=400, detail="Select at least two documents for comparison.")
+
+    embedding_model = get_embedding_model()
+    reranker_model = get_reranker_model()
+    contexts = []
+
+    for filename in files:
+        doc = await db.documents.find_one({"filename": filename})
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {filename}")
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File not found on disk: {filename}")
+
+        # Load and process the document as in your per_document_query
+        if is_image(filename):
+            text = ocr_image_file(file_path)
+            documents = [Document(page_content=text, metadata={"source": filename})]
+        elif is_pdf(filename):
+            if not pdf_has_text(file_path):
+                text = ocr_pdf_file(file_path)
+                documents = [Document(page_content=text, metadata={"source": filename})]
+            else:
+                documents = load_documents(file_path)
+        else:
+            documents = load_documents(file_path)
+
+        chunks = split_documents(documents)
+        temp_vectorstore = build_vectorstore(chunks, embedding_model)
+        retriever = temp_vectorstore.as_retriever(search_kwargs={"k": 5})
+        compressor = CrossEncoderReranker(model=reranker_model, top_n=3)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=retriever
+        )
+        relevant_chunks = compression_retriever.invoke(request.query)
+        unique_chunks = deduplicate_documents(relevant_chunks)
+
+        # Prepare context text for LLM
+        context = f"Document: {filename}\n"
+        for chunk in unique_chunks:
+            page = chunk.metadata.get("page_label", chunk.metadata.get("page", ""))
+            para = chunk.metadata.get("paragraph", "")
+            citation = f"Page {page}" if page else "Page ?"
+            if para:
+                citation += f", Paragraph {para}"
+            context += f"[{citation}] {chunk.page_content}\n\n"
+        contexts.append(context.strip())
+
+    # Compose LLM prompt for comparison
+    prompt = (
+        f"You are a helpful assistant. Compare the following documents for the user's question.\n"
+        f"User Question: {request.query}\n\n"
+        f"Below are context excerpts from each document:\n"
+    )
+    for idx, context in enumerate(contexts):
+        prompt += f"\n---\n{context}\n"
+
+    prompt = (
+        "You are a helpful assistant. Compare the following documents for the user's question.\n"
+        "Return your answer as a JSON object with the following structure:\n"
+        "{\n"
+        '  "similarities": ["..."],\n'
+        '  "differences": {\n'
+        '    "Document1.pdf": ["..."],\n'
+        '    "Document2.pdf": ["..."]\n'
+        "  },\n"
+        '  "summary": "..." \n'
+        "}\n"
+        f"User Question: {request.query}\n\n"
+        "Below are context excerpts from each document:\n"
+    )
+    for context in contexts:
+        prompt += f"\n---\n{context}\n"
+
+    prompt += (
+        "\nCompare all these documents: summarize the main similarities and differences between them regarding the user's question. "
+        "Clearly attribute points to the correct document (by filename) and cite page and paragraph numbers where relevant. "
+        "Respond ONLY with the JSON object."
+    )
+
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.environ.get("GROQ_API_KEY")
+    )
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that compares multiple documents based on provided context."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=700,
+            temperature=0.2,
+        )
+        # Try to parse the response as JSON
+        try:
+            comparison_structured = json.loads(completion.choices[0].message.content)
+        except Exception:
+            # fallback: treat as plain text
+            comparison_structured = {
+                "similarities": [],
+                "differences": {},
+                "summary": completion.choices[0].message.content.strip()
+            }
+    except Exception as e:
+        print(f"[ERROR] LLM comparison failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"LLM comparison failed: {str(e)}")
+
+    return CompareDocsResult(
+        compared_documents=files,
+        comparison=comparison_structured
+    )
+
+
 @router.post("/themes")
-async def identify_themes(request: QueryRequest):
+async def identify_themes(request: ThemeQueryRequest):
     query = request.query
+    selected_files = request.selected_files
     try:
         embedding_model = get_embedding_model()
-        reranker_model = get_reranker_model()
         if not os.path.exists(INDEX_FILE):
             print("[ERROR] No FAISS index found.")
             raise HTTPException(status_code=404, detail="No FAISS index found. Please upload a document first.")
 
         print("[INFO] Loading FAISS index for theme identification...")
         index = FAISS.load_local(VECTOR_STORE_PATH, embedding_model, allow_dangerous_deserialization=True)
-        retriever = index.as_retriever(search_kwargs={"k": 20})  # Get more context for themes
-        compressor = CrossEncoderReranker(model=reranker_model, top_n=10)
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor,
-            base_retriever=retriever
-        )
 
-        print("[INFO] Retrieving chunks for theme synthesis...")
-        reranked_documents = compression_retriever.invoke(query)
+        # Get ALL chunks from the index (not just top-K)
+        # This assumes your FAISS vectorstore exposes .docstore._dict.values()
+        all_docs = list(index.docstore._dict.values())
+
+        print("[DEBUG] selected_files:", selected_files)
+        selected_files_norm = set(os.path.basename(f).lower() for f in (selected_files or []))
+        reranked_documents = [
+            doc for doc in all_docs
+            if os.path.basename(doc.metadata.get("source", "")).lower() in selected_files_norm
+        ]
+        print("[DEBUG] After collecting all, reranked_documents:", [doc.metadata.get("source") for doc in reranked_documents])
+
         unique_docs = deduplicate_documents(reranked_documents)
         print(f"[INFO] Deduplicated to {len(unique_docs)} unique chunks for themes.")
 
@@ -495,6 +642,9 @@ async def identify_themes(request: QueryRequest):
             context += f"{citation} {doc.page_content}\n"
 
         print("[DEBUG] Context sent to Llama 3 for themes:\n", context)
+        if not context.strip():
+            print("[ERROR] No context found for selected files. Returning empty theme list.")
+            return {"themes": []}
 
         client = OpenAI(
             base_url="https://api.groq.com/openai/v1",
@@ -505,13 +655,12 @@ async def identify_themes(request: QueryRequest):
             completion = client.chat.completions.create(
                 model="llama3-70b-8192",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that reads the provided context and identifies common themes across all documents. Respond with a concise bullet list of themes, each theme on a new line."},
+                    {"role": "system", "content": "You are a helpful assistant that reads the provided context and identifies common themes across the selected documents. Respond with a concise bullet list of themes, each theme on a new line."},
                     {"role": "user", "content": f"Context:\n{context}\n\nIdentify the main themes across these documents. Return a bullet list, one theme per line."}
                 ],
                 max_tokens=300,
                 temperature=0.2,
             )
-            print("[DEBUG] Raw Groq API response for themes:", completion)
             answer = completion.choices[0].message.content.strip()
             print("[DEBUG] Synthesized themes answer:", answer)
             themes = [line.lstrip("-•* ").strip() for line in answer.splitlines() if line.strip()]
@@ -529,5 +678,4 @@ async def identify_themes(request: QueryRequest):
         print(f"[ERROR] Theme synthesis failed: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Theme synthesis failed: {e}")
-
 
