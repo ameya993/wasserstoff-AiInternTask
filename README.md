@@ -59,7 +59,8 @@ This system is composed of two main components:
 
 Below is a conceptual diagram of the document synthesis RAG pipeline:
 
-![image](https://github.com/user-attachments/assets/683dc9b2-eff5-4316-a4e6-b513e6531644)
+![generated-image](https://github.com/user-attachments/assets/4a29e81e-0a6f-4fbe-8acb-4a39c3590de6)
+
 
 ```
 
